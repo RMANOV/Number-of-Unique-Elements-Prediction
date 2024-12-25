@@ -1,0 +1,177 @@
+import numpy as np
+import pandas as pd
+import random
+import matplotlib.pyplot as plt
+from typing import List, Set, Dict
+from concurrent.futures import ProcessPoolExecutor
+from tqdm import tqdm
+import logging
+
+# Конфигурация на logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+class AdaptiveCVMCounter:
+    """Разширена версия на CVM брояча с адаптивна памет"""
+    
+    def __init__(self, initial_size: int = 100, max_size: int = 1000):
+        self.memory_size = initial_size
+        self.max_size = max_size
+        self.memory: Set = set()
+        self.current_round = 0
+        self.estimates_history = []
+        self.processed_counts = []
+        
+    def process_element(self, element) -> None:
+        if pd.isna(element):
+            return
+            
+        if element in self.memory:
+            for _ in range(self.current_round + 1):
+                if random.random() >= 0.5:
+                    self.memory.discard(element)
+                    break
+        else:
+            self.memory.add(element)
+            
+        if len(self.memory) >= self.memory_size:
+            self._start_new_round()
+    
+    def _start_new_round(self) -> None:
+        self.memory = set(random.sample(list(self.memory), len(self.memory) // 2))
+        self.current_round += 1
+        
+    def estimate_unique_count(self) -> int:
+        estimate = int(len(self.memory) * (2 ** self.current_round))
+        self.estimates_history.append(estimate)
+        return estimate
+        
+    def adjust_memory_size(self, error_rate: float) -> None:
+        """Адаптира размера на паметта базирано на грешката"""
+        if error_rate > 0.1 and self.memory_size < self.max_size:
+            self.memory_size = min(self.memory_size * 2, self.max_size)
+            logging.info(f"Memory size adjusted to: {self.memory_size}")
+
+class DataAnalyzer:
+    """Клас за анализ на данни с различни методи"""
+    
+    def __init__(self, file_path: str, column_name: str):
+        self.file_path = file_path
+        self.column_name = column_name
+        self.counter = AdaptiveCVMCounter()
+        self.exact_counts = []
+        self.cvm_estimates = []
+        self.processed_elements = []
+        
+    def process_data_parallel(self, batch_size: int = 1000, num_workers: int = 4) -> None:
+        """Паралелна обработка на данни"""
+        
+        def process_chunk(chunk):
+            local_counter = AdaptiveCVMCounter()
+            for value in chunk[self.column_name]:
+                local_counter.process_element(value)
+            return local_counter.estimate_unique_count()
+        
+        chunks = pd.read_excel(self.file_path, usecols=[self.column_name], chunksize=batch_size)
+        
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            results = list(tqdm(executor.map(process_chunk, chunks), desc="Processing chunks"))
+            
+        self.cvm_estimates.extend(results)
+        
+    def process_data_sequential(self, batch_size: int = 1000) -> None:
+        """Последователна обработка на данни"""
+        total_processed = 0
+        
+        for chunk in pd.read_excel(self.file_path, usecols=[self.column_name], chunksize=batch_size):
+            current_exact = len(set(chunk[self.column_name].dropna()))
+            
+            for value in chunk[self.column_name]:
+                self.counter.process_element(value)
+                total_processed += 1
+                
+            if total_processed % batch_size == 0:
+                estimate = self.counter.estimate_unique_count()
+                self.exact_counts.append(current_exact)
+                self.cvm_estimates.append(estimate)
+                self.processed_elements.append(total_processed)
+                
+                error_rate = abs(current_exact - estimate) / current_exact
+                self.counter.adjust_memory_size(error_rate)
+                
+                self._log_progress(total_processed, estimate, current_exact)
+    
+    def _log_progress(self, processed: int, estimate: int, exact: int) -> None:
+        """Логване на прогреса"""
+        logging.info(f"""
+        Processed elements: {processed}
+        Estimated unique: {estimate}
+        Exact unique: {exact}
+        Error rate: {abs(exact - estimate) / exact:.2%}
+        """)
+    
+    def visualize_results(self) -> None:
+        """Визуализация на резултатите"""
+        plt.figure(figsize=(12, 6))
+        
+        plt.plot(self.processed_elements, self.exact_counts, 
+                label='Exact Count', linestyle='--')
+        plt.plot(self.processed_elements, self.cvm_estimates, 
+                label='CVM Estimate', linestyle='-')
+        
+        plt.xlabel('Processed Elements')
+        plt.ylabel('Unique Elements Count')
+        plt.title('Comparison of Exact vs Estimated Unique Elements')
+        plt.legend()
+        plt.grid(True)
+        
+        plt.show()
+        
+    def get_statistics(self) -> Dict:
+        """Получаване на статистически данни"""
+        return {
+            'total_processed': len(self.processed_elements),
+            'final_estimate': self.cvm_estimates[-1] if self.cvm_estimates else 0,
+            'final_exact': self.exact_counts[-1] if self.exact_counts else 0,
+            'average_error': np.mean([abs(e - c) / c for e, c in 
+                                    zip(self.cvm_estimates, self.exact_counts)]) if self.exact_counts else 0
+        }
+
+def main():
+    """Основна функция за демонстрация"""
+    file_path = "your_excel_file.xlsx"
+    column_name = "your_column_name"
+    
+    # Инициализация на анализатора
+    analyzer = DataAnalyzer(file_path, column_name)
+    
+    # Избор на метод за обработка
+    use_parallel = input("Use parallel processing? (y/n): ").lower() == 'y'
+    
+    if use_parallel:
+        analyzer.process_data_parallel()
+    else:
+        analyzer.process_data_sequential()
+    
+    # Визуализация и статистика
+    analyzer.visualize_results()
+    stats = analyzer.get_statistics()
+    
+    logging.info("Final Statistics:")
+    for key, value in stats.items():
+        logging.info(f"{key}: {value}")
+
+if __name__ == "__main__":
+    main()
+
+#####################################################
+# Инсталирайте нужните пакети
+# pip install pandas numpy matplotlib tqdm
+
+# Променете file_path и column_name според вашия случай
+analyzer = DataAnalyzer("your_file.xlsx", "your_column")
+analyzer.process_data_sequential()  # или process_data_parallel()
+analyzer.visualize_results()
+print(analyzer.get_statistics())
