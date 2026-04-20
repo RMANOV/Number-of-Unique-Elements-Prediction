@@ -1,5 +1,10 @@
 # Unique Elements Counter - Advanced CVM Implementation
 
+## Technical deep-dives
+
+- **Medium:** [The Elegant Mathematics of Counting Things You Can't Remember](https://medium.com/@r.manov/the-elegant-mathematics-of-counting-things-you-cant-remember-c952c0bebf75)
+- **Dev.to:** [How to Count a Billion Unique Items with Almost No Memory](https://dev.to/ruslan_manov/how-to-count-a-billion-unique-items-with-almost-no-memory-735)
+
 ## Overview
 An elegant and efficient implementation of the groundbreaking CVM (Chakraborti-Variam-Meel) algorithm for streaming cardinality estimation. This project provides a sophisticated solution for counting unique elements in large-scale data streams while maintaining minimal memory footprint.
 
